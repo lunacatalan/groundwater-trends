@@ -1,0 +1,34 @@
+---
+title: "Piecewise Linear Regression for Groundwater Trends"
+author: "Luna Herschenfeld-Catalan"
+---
+
+# Data Access
+
+## Groudnwater Data
+
+Access groundwater data [here](https://zenodo.org/records/10003697). 
+
+Citation: Groundwater level data, aquifer system boundaries, and Supplementary Tables associated with Jasechko, S., Seybold, H., Perrone, D., Fan, Y., Shamsudduha, M., Taylor, R.G., Fallatah, O., Kirchner, J.W. Rapid groundwater decline and some cases of recovery in aquifers globally. Nature, https://doi.org/10.1038/s41586-023-06879-8 (2024).
+
+- Depth to groundwater is saved as `AnnualDepthToGroundwater.csv`. Due to the way its measured, positive slope values signify declines in groundwater. 
+- Groundwater elevation is saved as `AnnualGroundwaterElevation.csv`. 
+
+# Data Exploration 
+
+```{r setup, include=FALSE, message=FALSE, warning = FALSE}
+library(tidyverse)
+library(here)
+
+```
+
+
+Analysis should include 
+```{r message=FALSE, warning = FALSE}
+# read in the depth data
+depth <- read_csv(here('data', "AnnualDepthToGroundwater.csv"))
+
+# read in the elevation data
+elevation <- read_csv(here('data', "AnnualGroundwaterElevation.csv"))
+```
+
