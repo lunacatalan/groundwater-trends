@@ -14,12 +14,20 @@ Citation: Groundwater level data, aquifer system boundaries, and Supplementary T
 - Depth to groundwater is saved as `AnnualDepthToGroundwater.csv`. Due to the way its measured, positive slope values signify declines in groundwater. 
 - Groundwater elevation is saved as `AnnualGroundwaterElevation.csv`. 
 
+## US data
+
+Accessed us boundary data [here](https://www.census.gov/cgi-bin/geo/shapefiles/index.php?year=2023&layergroup=States+%28and+equivalent%29)
+
 # Data Exploration 
 
 ```{r setup, include=FALSE, message=FALSE, warning = FALSE}
 library(tidyverse)
 library(here)
 
+# to make geospatil objects
+library(sf)
+
+library(usmap)
 ```
 
 
@@ -30,5 +38,62 @@ depth <- read_csv(here('data', "AnnualDepthToGroundwater.csv"))
 
 # read in the elevation data
 elevation <- read_csv(here('data', "AnnualGroundwaterElevation.csv"))
+
+# reda in map data
+us <- st_read(here("data", "tl_2023_us_state", "tl_2023_us_state.shp")) %>% 
+  janitor::clean_names() %>% 
+  select(name, geometry)
 ```
 
+
+```{r message=FALSE, warning = FALSE}
+
+location <- depth %>% 
+  select(StnID, Lat, Lon) %>% 
+  distinct() %>% # select the unique well names
+  st_as_sf(coords = c("Lon", "Lat")) # set the geographic coordinates
+
+# set coordinate reference system
+location <- location %>% 
+  st_set_crs(st_crs(us)) # same crs as us df
+
+# check
+##st_crs(location)
+
+# all the points - this isnt super helpful 
+ggplot(location) +
+  geom_sf(size = 0.5)
+  
+```
+
+
+Create a subset of Texas Wells
+
+```{r message=FALSE, warning = FALSE}
+# filter for texas
+texas <- us %>% 
+  filter(name == "Texas")
+
+plot(texas)
+
+# check
+##st_crstexas) == st_crs(location)
+
+# select the well locations within Texas
+texas_wells <- location %>% 
+  st_intersection(texas)
+
+ggplot(texas_wells) +
+  geom_sf(size = 0.5)
+```
+
+Select all the well data in Texas
+- What is the time buffer that I want for the wells? 
+- Do I only want monitoring wells that span 40+ years?
+
+```{r message=FALSE, warning = FALSE}
+
+depth_texas <- depth %>% 
+  filter(StnID %in% texas_wells$StnID) # select IDs that match the Texas location
+  
+```
