@@ -5,7 +5,7 @@ author: "Luna Herschenfeld-Catalan"
 
 # Data Access
 
-## Groudnwater Data
+## Groundwater Data
 
 Access groundwater data [here](https://zenodo.org/records/10003697). 
 
@@ -28,6 +28,14 @@ library(here)
 library(sf)
 
 library(usmap)
+
+library(forecast)
+
+# fill in the missing NA values
+library(performanceEstimation)
+
+library(tidyfit)
+library(lubridate)
 ```
 
 
@@ -57,6 +65,11 @@ location <- depth %>%
 location <- location %>% 
   st_set_crs(st_crs(us)) # same crs as us df
 
+station_counts <- depth %>% 
+  group_by(StnID) %>% 
+  summarize(count = n()) %>% 
+  filter(count > 10)
+
 # check
 ##st_crs(location)
 
@@ -74,7 +87,7 @@ Create a subset of Texas Wells
 texas <- us %>% 
   filter(name == "Texas")
 
-plot(texas)
+# plot(texas)
 
 # check
 ##st_crstexas) == st_crs(location)
@@ -83,17 +96,160 @@ plot(texas)
 texas_wells <- location %>% 
   st_intersection(texas)
 
+# select the texas wells that have more than 10 observations
+texas_wells_count <- texas_wells %>% 
+  filter(StnID %in% station_counts$StnID) # select IDs that match the Texas location
+
 ggplot(texas_wells) +
+  geom_sf(size = 0.5)
+
+ggplot(texas_wells_count) +
   geom_sf(size = 0.5)
 ```
 
 Select all the well data in Texas
-- What is the time buffer that I want for the wells? 
-- Do I only want monitoring wells that span 40+ years?
+- What is the time buffer that I want for the wells? **10 years**
 
 ```{r message=FALSE, warning = FALSE}
 
 depth_texas <- depth %>% 
-  filter(StnID %in% texas_wells$StnID) # select IDs that match the Texas location
+  filter(StnID %in% texas_wells_count$StnID) # select IDs that match the Texas location
+
   
 ```
+
+
+
+```{r eval = FALSE, warning = FALSE, message = FALSE}
+subset <- depth_texas %>% 
+  mutate(year = IntegerYear) %>% 
+  filter(StnID == "1000297815") %>% 
+  arrange(year)
+
+# generate a time sequence to fill in missing dates
+subset_years <- data.frame(year = seq(min(subset$year), max(subset$year)))
+
+# merge years with dataframe
+subset <- merge(subset, subset_years, all = T) %>% 
+  mutate(valley_flag = ifelse(lag(year, 5) %in% year & lead(year, 5) %in% year, TRUE, FALSE))
+
+ggplot() +
+  geom_point(data = subset, 
+             aes(x = year, y = DepthToWater_m))
+```
+
+
+```{r eval = FALSE, warning = FALSE, message = FALSE}
+
+valleys_df <- subset %>%
+  mutate(valley_flag = ifelse(valley_flag == TRUE, 
+                              ifelse(DepthToWater_m <= lag(DepthToWater_m, 5) & DepthToWater_m <= lead(DepthToWater_m, 5), 
+                                     "valley", 
+                                     "not"), 
+                              NA))
+
+ggplot() +
+  geom_point(data = valleys_df, 
+             aes(x = year, y = DepthToWater_m, color = valley_flag))
+```
+
+Create a rolling window and calculate a linear regression each 4 years: 
+```{r warning = FALSE, message = FALSE}
+results <- subset %>%
+    mutate(rolling_index = row_number()) %>%
+    group_by(rolling_index)
+
+index <- first(results$rolling_index)
+start_date <- results$year[index]
+end_date <- start_date + 5
+window_data <- subset %>%
+  filter(year >= start_date & year <= end_date)
+lm_results <- lm(DepthToWater_m ~ year, data = window_data)
+slope <- summary(lm_results)$coefficients[2] # get the slope
+data.frame(start_date = start_date, end_date = end_date, coefficients)
+
+
+results <- subset %>%
+    mutate(rolling_index = row_number()) %>%
+    group_by(rolling_index)
+
+coef_df <- data.frame()
+
+for(start_year in seq_along(results$year)) {
+  
+  start_date <- results$year[start_year]
+  end_year <- start_date + 4
+  window_data <- subset %>%
+    filter(year >= start_year & year <= end_year)
+  lm_results <- lm(DepthToWater_m ~ year, data = window_data)
+  slope <- summary(lm_results)$coefficients[2] # get the slope
+  df <- data.frame(start_date = start_date, 
+                   end_date = end_year, slope) 
+  
+  coef_df <- rbind(coef_df, df)
+  
+}
+
+sub <- data.frame()
+
+seq_yr <- seq(1, nrow(coef_df), by = 4)
+
+for(i in seq(seq_yr)) {
+  
+  sub <- coef_df[i]  # Select every 5 rows
+  print(sub)
+  
+}
+
+
+```
+
+# Create function for rolling regression
+
+```{r warning = FALSE, message = FALSE}
+# Function to calculate rolling linear regression
+rolling_lm <- function(data, window_size) {
+  
+  results <- data %>%
+    mutate(rolling_index = row_number()) %>%
+    group_by(rolling_index) 
+  
+  coef_df <- data.frame()
+  
+  for(start_year in seq_along(results$year)) {
+    
+    start_date <- results$year[start_year]
+    end_year <- start_date + window_size
+    window_data <- subset %>%
+      filter(year >= start_year & year <= end_year)
+    lm_results <- lm(DepthToWater_m ~ year, data = window_data)
+    slope <- summary(lm_results)$coefficients[2] # get the slope
+    df <- data.frame(start_date = start_date, 
+                     end_date = end_year, slope) 
+    
+    coef_df <- rbind(coef_df, df)
+    
+  }
+  
+  return(coef_df)
+}
+
+# Calculate rolling linear regression with a 5-year window
+rolling_results <- rolling_lm(subset, window_size = 4)
+
+```
+
+
+```{r}
+
+ggplot() +
+  geom_point(data = subset, 
+             aes(x = year, y = DepthToWater_m))
+
+
+ggplot() +
+  geom_point(data = rolling_results, 
+             aes(x = start_date, y = end_date))
+```
+
+
