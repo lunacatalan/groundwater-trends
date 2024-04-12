@@ -1,4 +1,4 @@
-# Function to calculate rolling linear regression
+# Function to calculate rolling linear regression using year values
 #' Title
 #'
 #' @param data the dataframe to calculate the rolling index
@@ -9,19 +9,19 @@
 #'
 #' @examples
 
-rolling_lm <- function(data, window_size) {
+rolling_lm_yr <- function(data, window_size) {
   
   years <- c(data$year)
   
   coef_df <- data.frame()
   
-  for(start_year in seq_along(years)) {
+  for(start_year in seq(1, nrow(subset), by = window_size)) {
     
     start_date <- years[start_year]
     
     end_year <- start_date + window_size
     
-    window_data <- results %>%
+    window_data <- data %>%
       filter(year >= start_date & year <= end_year)
     
     # Check if there are any NA values in DepthToWater_m

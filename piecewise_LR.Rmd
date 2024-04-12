@@ -123,7 +123,7 @@ depth_texas <- depth %>%
 ```{r warning = FALSE, message = FALSE}
 subset <- depth_texas %>% 
   mutate(year = IntegerYear) %>% 
-  filter(StnID == "1000297815") %>% 
+  filter(StnID == "1040141399") %>% 
   arrange(year)
 
 # generate a time sequence to fill in missing dates
@@ -134,7 +134,7 @@ subset <- merge(subset, subset_years, all = T) %>%
   mutate(valley_flag = ifelse(lag(year, 5) %in% year & lead(year, 5) %in% year, TRUE, FALSE))
 
 ggplot() +
-  geom_point(data = subset, 
+  geom_line(data = subset, 
              aes(x = year, y = DepthToWater_m))
 ```
 
@@ -250,37 +250,77 @@ for(start_year in seq_along(years)) {
 
 ```
 
-# Create function for rolling regression
+```{r}
 
-```{r warning = FALSE, message = FALSE}
-# Function to calculate rolling linear regression
-rolling_lm <- function(data, window_size) {
-  
-  years <- c(data$year)
+subset <- subset %>% 
+    mutate(index = row_number())
   
   coef_df <- data.frame()
   
-  for(start_year in seq_along(years)) {
+for(position in seq(1, nrow(subset), by = 5)) {
     
-    start_date <- years[start_year]
+    start_position <- position
 
-    end_year <- start_date + window_size
+    end_position <- start_position + 5
 
-    window_data <- results %>%
-      filter(year >= start_date & year <= end_year)
+    window_data <- subset %>%
+      filter(index >= start_position & index <= end_position)
     
     # Check if there are any NA values in DepthToWater_m
     if (any(is.na(window_data$DepthToWater_m))) {
       next
     }
     
-    lm_results <- lm(DepthToWater_m ~ year, 
+    lm_results <- lm(DepthToWater_m ~ index, 
                      data = window_data)
     
     slope <- summary(lm_results)$coefficients[2] # get the slope
     
-    df <- data.frame(start_date = start_date, 
-                     end_date = end_year, 
+    df <- data.frame(index = position,
+                     start_date = start_position, 
+                     end_date = end_position, 
+                     slope = slope) 
+    
+    coef_df <- rbind(coef_df, df)
+    
+    
+  }
+```
+
+
+# Create function for rolling regression
+
+```{r warning = FALSE, message = FALSE}
+# Function to calculate rolling linear regression
+rolling_lm <- function(data, window_size) {
+  
+  data <- data %>% 
+    mutate(index = row_number())
+  
+  coef_df <- data.frame()
+  
+  for(position in seq(1, nrow(subset), by = window_size)) {
+    
+    start_position <- position
+
+    end_position <- start_position + window_size
+
+    window_data <- data %>%
+      filter(index >= start_position & index <= end_position)
+    
+    # Check if there are any NA values in DepthToWater_m
+    if (any(is.na(window_data$DepthToWater_m))) {
+      next
+    }
+    
+    lm_results <- lm(DepthToWater_m ~ index, 
+                     data = window_data)
+    
+    slope <- summary(lm_results)$coefficients[2] # get the slope
+    
+    df <- data.frame(index = position,
+                     start_date = data$year[start_position], 
+                     end_date = data$year[end_position], 
                      slope = slope) 
     
     coef_df <- rbind(coef_df, df)
@@ -288,25 +328,87 @@ rolling_lm <- function(data, window_size) {
   
   return(coef_df)
 }
+```
+
+
+Want code to be able to detect a case like saudis arabia 
+    - Change in sign of slope (if using depth to water: positive to negative slope)
+    - Change in magnitude (product of slopes should be negative; difference between change in slopes slopes should be > 0.5m/yr)
+    
+```{r warning = FALSE, message = FALSE}
+
+source("funs/rolling_lm_index.R")
+source("funs/rolling_lm_yr.R")
 
 # Calculate rolling linear regression with a 5-year window
-rolling_results <- rolling_lm(subset, window_size = 5)
-
-rolling_5 = rolling_results[seq(1, nrow(rolling_results), 5), ]
+rolling_results <- rolling_lm_index(subset, window_size = 5) %>% 
+  
+  # calculate the change in slope
+  mutate(change = c(NA, diff(slope)),
+         
+         # calculate the sign change
+         sign_change = c(0, diff(sign(slope)))) %>%  
+  
+  # identify when the magnitude change is greater than 0.5 and the sign changes from pos to neg
+  mutate(flag = ifelse(abs(change) >= 0.5 & sign_change == -2,
+                       "breakpoint",
+                       NA)) %>% 
+  filter(flag == "breakpoint")
 
 ```
 
 
 ```{r}
 
-ggplot() +
-  geom_point(data = subset, 
-             aes(x = year, y = DepthToWater_m))
+ggplot(data = subset, 
+             aes(x = year, y = DepthToWater_m)) +
+  geom_line() +
+  geom_vline(data = rolling_results, 
+             aes(xintercept = start_date), 
+             color = "red",  # Adjust color as needed
+             linetype = "dashed") +  # Adjust linetype as needed
+  scale_y_reverse()
 
-ggplot() +
-  geom_line(data = rolling_5, 
-             aes(x = start_date, y = slope))
+```
 
+# Loading in the Houston data
+```{r}
+houston <- readxl::read_xlsx(here::here("data", "houston_gw.xlsx")) %>% 
+  select(Date, DepthToWater_m = DepthToGW_m) %>% 
+  mutate(year = stringr::str_extract(Date, ".*(?=\\.)")) %>% 
+  mutate(year = as.numeric(year)) %>% 
+  group_by(year) %>% 
+  summarize(DepthToWater_m = mean(DepthToWater_m)) %>% 
+  ungroup()
+
+houston_lm <- rolling_lm(houston, window_size = 4) %>% 
+  
+  # calculate the change in slope
+  mutate(change = c(NA, diff(slope)),
+         
+         # calculate the sign change
+         sign_change = c(0, diff(sign(slope))),
+         
+         start_date = as.numeric(start_date),
+         end_date = as.numeric(end_date)) %>%  
+  
+  # identify when the magnitude change is greater than 0.5 and the sign changes from pos to neg
+  mutate(flag = ifelse(abs(change) >= 0.5 & sign_change == -2,
+                       "breakpoint",
+                       NA)) %>% 
+  filter(flag == "breakpoint")
+```
+
+
+```{r}
+ggplot() +
+  geom_point(data = houston, 
+             aes(x = year, y = DepthToWater_m)) +
+  geom_vline(data = houston_lm, 
+             aes(xintercept = start_date), 
+             color = "red",  # Adjust color as needed
+             linetype = "dashed") +  # Adjust linetype as needed
+  scale_y_reverse()
 ```
 
 
