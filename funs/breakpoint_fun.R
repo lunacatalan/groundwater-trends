@@ -1,15 +1,14 @@
-# Function to calculate rolling linear regression using index values
 #' Title
 #'
-#' @param data the dataframe to calculate the rolling index
-#' @param window_size the number of years in the window
+#' @param data 
+#' @param window_size 
 #'
-#' @return
+#' @return A dataframe of the identified breakpoints
 #' @export
 #'
 #' @examples
 
-rolling_lm_index <- function(data, window_size) {
+breakpoint_fun <- rolling_lm_index <- function(data, window_size) {
   
   data <- data %>% 
     mutate(index = row_number())
@@ -29,7 +28,7 @@ rolling_lm_index <- function(data, window_size) {
     # if (any(is.na(window_data$DepthToWater_m))) {
     #   next
     # }
-
+    
     lm_results <- lm(DepthToWater_m ~ index, 
                      data = window_data)
     
@@ -43,5 +42,21 @@ rolling_lm_index <- function(data, window_size) {
     coef_df <- rbind(coef_df, df)
   }
   
-  return(coef_df)
+  breakpoint_df <- coef_df %>% 
+    # calculate the change in slope
+    mutate(change = c(NA, diff(slope)),
+           
+           # calculate the sign change
+           sign_change = c(0, diff(sign(slope))),
+           
+           start_date = as.numeric(start_date),
+           end_date = as.numeric(end_date)) %>%  
+    
+    # identify when the magnitude change is greater than 0.5 and the sign changes from pos to neg
+    mutate(flag = ifelse(abs(change) >= 0.5 & sign_change == -2,
+                         "breakpoint",
+                         NA)) %>% 
+    filter(flag == "breakpoint")
+  
+  return(breakpoint_df)
 }

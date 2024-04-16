@@ -135,7 +135,8 @@ subset <- merge(subset, subset_years, all = T) %>%
 
 ggplot() +
   geom_line(data = subset, 
-             aes(x = year, y = DepthToWater_m))
+             aes(x = year, y = DepthToWater_m)) +
+  scale_y_reverse()
 ```
 
 
@@ -150,12 +151,13 @@ valleys_df <- subset %>%
 
 ggplot() +
   geom_point(data = valleys_df, 
-             aes(x = year, y = DepthToWater_m, color = valley_flag))
+             aes(x = year, y = DepthToWater_m, color = valley_flag)) +
+  scale_y_reverse()
 
 ```
 
 Create a rolling window and calculate a linear regression each 4 years: 
-```{r warning = FALSE, message = FALSE, eval = TRUE}
+```{r warning = FALSE, message = FALSE, eval = FALSE}
 results <- subset %>%
     mutate(rolling_index = row_number()) %>%
     group_by(rolling_index)
@@ -253,28 +255,33 @@ for(start_year in seq_along(years)) {
 ```{r}
 
 subset <- subset %>% 
-    mutate(index = row_number())
-  
-  coef_df <- data.frame()
+  mutate(index = row_number())
+
+coef_df <- data.frame()
   
 for(position in seq(1, nrow(subset), by = 5)) {
     
     start_position <- position
+    #print(start_position)
 
     end_position <- start_position + 5
+    #print(end_position)
 
     window_data <- subset %>%
       filter(index >= start_position & index <= end_position)
     
-    # Check if there are any NA values in DepthToWater_m
-    if (any(is.na(window_data$DepthToWater_m))) {
-      next
-    }
+    #print(length(window_data))
     
-    lm_results <- lm(DepthToWater_m ~ index, 
+    # Check if there are any NA values in DepthToWater_m
+    # if (any(is.na(window_data$DepthToWater_m))) {
+    #   next
+    # }
+    
+    lm_results <- lm(DepthToWater_m ~ IntegerYear, 
                      data = window_data)
     
     slope <- summary(lm_results)$coefficients[2] # get the slope
+    print(slope)
     
     df <- data.frame(index = position,
                      start_date = start_position, 
@@ -284,7 +291,15 @@ for(position in seq(1, nrow(subset), by = 5)) {
     coef_df <- rbind(coef_df, df)
     
     
-  }
+}
+
+# I dont know whats going o and why this is not doing what I want it to 
+#window_data
+
+yay <- lm(DepthToWater_m ~ IntegerYear, 
+                     data = window_data)
+
+#yay$coefficients
 ```
 
 
@@ -299,7 +314,7 @@ rolling_lm <- function(data, window_size) {
   
   coef_df <- data.frame()
   
-  for(position in seq(1, nrow(subset), by = window_size)) {
+  for(position in seq(1, nrow(data), by = window_size)) {
     
     start_position <- position
 
@@ -309,9 +324,9 @@ rolling_lm <- function(data, window_size) {
       filter(index >= start_position & index <= end_position)
     
     # Check if there are any NA values in DepthToWater_m
-    if (any(is.na(window_data$DepthToWater_m))) {
-      next
-    }
+    # if (any(is.na(window_data$DepthToWater_m))) {
+    #   next
+    # }
     
     lm_results <- lm(DepthToWater_m ~ index, 
                      data = window_data)
@@ -341,7 +356,7 @@ source("funs/rolling_lm_index.R")
 source("funs/rolling_lm_yr.R")
 
 # Calculate rolling linear regression with a 5-year window
-rolling_results <- rolling_lm_index(subset, window_size = 5) %>% 
+rolling_results <- rolling_lm_yr(subset, window_size = 5) %>% 
   
   # calculate the change in slope
   mutate(change = c(NA, diff(slope)),
@@ -362,7 +377,7 @@ rolling_results <- rolling_lm_index(subset, window_size = 5) %>%
 
 ggplot(data = subset, 
              aes(x = year, y = DepthToWater_m)) +
-  geom_line() +
+  geom_point() +
   geom_vline(data = rolling_results, 
              aes(xintercept = start_date), 
              color = "red",  # Adjust color as needed
@@ -372,6 +387,7 @@ ggplot(data = subset,
 ```
 
 # Loading in the Houston data
+
 ```{r}
 houston <- readxl::read_xlsx(here::here("data", "houston_gw.xlsx")) %>% 
   select(Date, DepthToWater_m = DepthToGW_m) %>% 
@@ -381,7 +397,7 @@ houston <- readxl::read_xlsx(here::here("data", "houston_gw.xlsx")) %>%
   summarize(DepthToWater_m = mean(DepthToWater_m)) %>% 
   ungroup()
 
-houston_lm <- rolling_lm(houston, window_size = 4) %>% 
+houston_lm <- rolling_lm_index(houston, window_size = 4) %>% 
   
   # calculate the change in slope
   mutate(change = c(NA, diff(slope)),
@@ -397,10 +413,73 @@ houston_lm <- rolling_lm(houston, window_size = 4) %>%
                        "breakpoint",
                        NA)) %>% 
   filter(flag == "breakpoint")
+
+```
+
+## create nested functions to identify breakpoints
+
+```{r}
+
+breakpoint_fun <- rolling_lm_index <- function(data, window_size) {
+  
+  data <- data %>% 
+    mutate(index = row_number())
+  
+  coef_df <- data.frame()
+  
+  for(position in seq(1, nrow(data), by = window_size)) {
+    
+    start_position <- position
+    
+    end_position <- start_position + window_size
+    
+    window_data <- data %>%
+      filter(index >= start_position & index <= end_position)
+    
+    # Check if there are any NA values in DepthToWater_m
+    # if (any(is.na(window_data$DepthToWater_m))) {
+    #   next
+    # }
+
+    lm_results <- lm(DepthToWater_m ~ index, 
+                     data = window_data)
+    
+    slope <- summary(lm_results)$coefficients[2] # get the slope
+    
+    df <- data.frame(index = position,
+                     start_date = data$year[position], 
+                     end_date = data$year[end_position], 
+                     slope = slope) 
+    
+    coef_df <- rbind(coef_df, df)
+  }
+  
+  breakpoint_df <- coef_df %>% 
+    # calculate the change in slope
+    mutate(change = c(NA, diff(slope)),
+           
+           # calculate the sign change
+           sign_change = c(0, diff(sign(slope))),
+           
+           start_date = as.numeric(start_date),
+           end_date = as.numeric(end_date)) %>%  
+    
+    # identify when the magnitude change is greater than 0.5 and the sign changes from pos to neg
+    mutate(flag = ifelse(abs(change) >= 0.5 & sign_change == -2,
+                         "breakpoint",
+                         NA)) %>% 
+    filter(flag == "breakpoint")
+  
+  return(breakpoint_df)
+}
+
+
 ```
 
 
 ```{r}
+houston_lm <- breakpoint_fun(houston, window_size = 5)
+
 ggplot() +
   geom_point(data = houston, 
              aes(x = year, y = DepthToWater_m)) +
@@ -411,4 +490,91 @@ ggplot() +
   scale_y_reverse()
 ```
 
+# Apply the function to the whole `depth_texas`
+
+I encountered a problem with a datatype like the one below. How do I deal with these? 
+
+```{r}
+depth_id <- depth_texas %>% 
+  select(StnID) %>% 
+  group_by(StnID) %>%
+  distinct() %>% 
+  head(5)
+
+# depth_id[[1]][1]
+# 
+subset <- depth_texas %>%
+    filter(StnID %in% depth_id[[1]][1])  %>% 
+    mutate(year = IntegerYear)
+
+# this one looks at the years
+subset_lm_yr2 <- rolling_lm_yr(subset, window_size = 5)
+subset_lm_index2 <- rolling_lm_index(subset, window_size = 4)
+
+ggplot() +
+  geom_point(data = subset, 
+             aes(x = year, y = DepthToWater_m)) +
+  scale_y_reverse()
+```
+
+
+Troubleshooting the above code that returns 0 observations
+- The code works, the `rolling_lm_index()` does not detect any changes. However, the `rolling_lm_yr` does product observations. 
+- Okay just kidding, now the functions work
+
+```{r eval = FALSE}
+data <- subset %>% 
+  mutate(index = row_number())
+
+coef_df <- data.frame()
+
+for(position in seq(1, nrow(data), by = 5)) {
+  
+  start_position <- position
+  print(start_position)
+  
+  end_position <- start_position + 5
+  
+  window_data <- data %>%
+    filter(index >= start_position & index <= end_position)
+  
+  # Check if there are any NA values in DepthToWater_m
+  # if (any(is.na(window_data$DepthToWater_m))) {
+  #   next
+  # }
+  
+  lm_results <- lm(DepthToWater_m ~ index, 
+                   data = window_data)
+  
+  slope <- summary(lm_results)$coefficients[2] # get the slope
+  
+  df <- data.frame(index = position,
+                   start_date = data$year[start_position], 
+                   end_date = data$year[end_position], 
+                   slope = slope) 
+  
+  coef_df <- rbind(coef_df, df)
+}
+
+subset_df <- data.frame()
+
+for(group in seq_along(depth_id)) {
+  #print(depth_id[[group]])
+  
+  subset <- depth_texas %>% 
+    filter(StnID %in% depth_id[[1]][group]) %>% 
+    mutate(year = IntegerYear)
+  
+  
+  subset_lm <- breakpoint_fun(subset, window_size = 5) 
+  
+  subset_df <- rbind(subset_df, subset_lm)
+}
+
+#unique(subset_df$StnID) == unique(depth_id$StnID)
+```
+
+Next steps: 
+
+1. Run the function, and if 0 breakpoint observations are returned then store that `StnID` but continue going. Then, we can investigate the `StnID`'s that are in that dataframe to see if they are worse case scenarios. 
 

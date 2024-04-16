@@ -15,7 +15,7 @@ rolling_lm_yr <- function(data, window_size) {
   
   coef_df <- data.frame()
   
-  for(start_year in seq(1, nrow(subset), by = window_size)) {
+  for(start_year in seq(1, nrow(data), by = window_size)) {
     
     start_date <- years[start_year]
     
@@ -25,9 +25,9 @@ rolling_lm_yr <- function(data, window_size) {
       filter(year >= start_date & year <= end_year)
     
     # Check if there are any NA values in DepthToWater_m
-    if (any(is.na(window_data$DepthToWater_m))) {
-      next
-    }
+    # if (any(is.na(window_data$DepthToWater_m))) {
+    #   next
+    # }
     
     lm_results <- lm(DepthToWater_m ~ year, 
                      data = window_data)
