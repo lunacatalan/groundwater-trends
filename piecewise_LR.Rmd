@@ -70,17 +70,20 @@ station_counts <- depth %>%
   summarize(count = n()) %>% 
   filter(count > 10)
 
+depth_clean <- depth %>% 
+  filter(StnID %in% station_counts$StnID)
+
 # check
 ##st_crs(location)
 
 # all the points - this isnt super helpful 
-ggplot(location) +
-  geom_sf(size = 0.5)
+# ggplot(location) +
+#   geom_sf(size = 0.5)
   
 ```
 
 
-Create a subset of Texas Wells
+## Create a subset of Texas Wells
 
 ```{r message=FALSE, warning = FALSE}
 # filter for texas
@@ -100,11 +103,11 @@ texas_wells <- location %>%
 texas_wells_count <- texas_wells %>% 
   filter(StnID %in% station_counts$StnID) # select IDs that match the Texas location
 
-ggplot(texas_wells) +
-  geom_sf(size = 0.5)
-
-ggplot(texas_wells_count) +
-  geom_sf(size = 0.5)
+# ggplot(texas_wells) +
+#   geom_sf(size = 0.5)
+# 
+# ggplot(texas_wells_count) +
+#   geom_sf(size = 0.5)
 ```
 
 Select all the well data in Texas
@@ -156,7 +159,10 @@ ggplot() +
 
 ```
 
+## Create Rolling Window Regression 
+
 Create a rolling window and calculate a linear regression each 4 years: 
+
 ```{r warning = FALSE, message = FALSE, eval = FALSE}
 results <- subset %>%
     mutate(rolling_index = row_number()) %>%
@@ -296,9 +302,6 @@ for(position in seq(1, nrow(subset), by = 5)) {
 # I dont know whats going o and why this is not doing what I want it to 
 #window_data
 
-yay <- lm(DepthToWater_m ~ IntegerYear, 
-                     data = window_data)
-
 #yay$coefficients
 ```
 
@@ -416,7 +419,7 @@ houston_lm <- rolling_lm_index(houston, window_size = 4) %>%
 
 ```
 
-## create nested functions to identify breakpoints
+## Create nested functions to identify breakpoints
 
 ```{r}
 
@@ -473,9 +476,8 @@ breakpoint_fun <- rolling_lm_index <- function(data, window_size) {
   return(breakpoint_df)
 }
 
-
 ```
-
+### Test on the Houston Data
 
 ```{r}
 houston_lm <- breakpoint_fun(houston, window_size = 5)
@@ -508,8 +510,11 @@ subset <- depth_texas %>%
     mutate(year = IntegerYear)
 
 # this one looks at the years
-subset_lm_yr2 <- rolling_lm_yr(subset, window_size = 5)
+subset_lm_yr2 <- rolling_lm_yr(subset, window_size = 4)
 subset_lm_index2 <- rolling_lm_index(subset, window_size = 4)
+
+# no breakpoint identified 
+subset_bp <- breakpoint_fun(subset, window_size = 4)
 
 ggplot() +
   geom_point(data = subset, 
@@ -522,59 +527,175 @@ Troubleshooting the above code that returns 0 observations
 - The code works, the `rolling_lm_index()` does not detect any changes. However, the `rolling_lm_yr` does product observations. 
 - Okay just kidding, now the functions work
 
-```{r eval = FALSE}
-data <- subset %>% 
-  mutate(index = row_number())
-
-coef_df <- data.frame()
-
-for(position in seq(1, nrow(data), by = 5)) {
-  
-  start_position <- position
-  print(start_position)
-  
-  end_position <- start_position + 5
-  
-  window_data <- data %>%
-    filter(index >= start_position & index <= end_position)
-  
-  # Check if there are any NA values in DepthToWater_m
-  # if (any(is.na(window_data$DepthToWater_m))) {
-  #   next
-  # }
-  
-  lm_results <- lm(DepthToWater_m ~ index, 
-                   data = window_data)
-  
-  slope <- summary(lm_results)$coefficients[2] # get the slope
-  
-  df <- data.frame(index = position,
-                   start_date = data$year[start_position], 
-                   end_date = data$year[end_position], 
-                   slope = slope) 
-  
-  coef_df <- rbind(coef_df, df)
-}
-
-subset_df <- data.frame()
-
-for(group in seq_along(depth_id)) {
-  #print(depth_id[[group]])
-  
-  subset <- depth_texas %>% 
-    filter(StnID %in% depth_id[[1]][group]) %>% 
-    mutate(year = IntegerYear)
-  
-  
-  subset_lm <- breakpoint_fun(subset, window_size = 5) 
-  
-  subset_df <- rbind(subset_df, subset_lm)
-}
-
-#unique(subset_df$StnID) == unique(depth_id$StnID)
-```
-
 Next steps: 
 
 1. Run the function, and if 0 breakpoint observations are returned then store that `StnID` but continue going. Then, we can investigate the `StnID`'s that are in that dataframe to see if they are worse case scenarios. 
+
+```{r}
+# select 5 IDs
+depth_id <- depth_texas %>% 
+  select(StnID) %>% 
+  group_by(StnID) %>%
+  distinct() %>% 
+  head(5)
+
+# create subset of data with 5 wells
+subset <- depth_texas %>%
+    filter(StnID %in% depth_id$StnID)  %>% 
+    mutate(year = IntegerYear)
+
+# check that it subsetted correctly
+unique(depth_id$StnID) == unique(subset$StnID)
+```
+
+What do I want the function to do?
+- Take in a complete data set
+- take the unique groups (use distinct to make a list?)
+- iterate through that list and filter for only that data 
+- run the breakpoint function on it
+- if the nrow(sub_breakpoint) < 1 save the StnID to a list 
+- if the nrow(subset_bp) > 1 save the StnID to a dataframe
+
+Framework: 
+```{r}
+# create list of unique IDs
+id_list <- subset$StnID %>% 
+  unique()
+
+# filter for only a single station
+sub <- subset %>% 
+  filter(StnID == id_list[3])
+
+# run the breakpoint function on it
+bp_df <- breakpoint_fun(sub, window_size = 5)
+
+no_bp_list <- list()
+bp_list <- list()
+
+if (nrow(bp_df) < 1) {
+  no_bp_list[2] <- sub$StnID
+}
+
+if (nrow(bp_df) >= 1) {
+  bp_list[2] <- sub$StnID
+}
+```
+
+## Create the for loop to iterate over the id_list
+```{r}
+
+no_bp <- data.frame()
+bp <- data.frame()
+
+name <- "StnID"
+
+
+for (id in seq(id_list)) {
+  
+  # filter for only a single station
+  sub <- subset %>% 
+    filter(StnID == id_list[id])
+  
+  ID = id_list[id]
+  
+  # run the breakpoint function on it
+  bp_df <- breakpoint_fun(sub, window_size = 5)
+  
+  ifelse(nrow(bp_df) < 1,
+         no_bp <- rbind(no_bp, ID),
+         bp <- rbind(bp, ID))
+  
+}
+
+colnames(no_bp) <- name
+colnames(bp) <- name
+```
+
+Check the output
+- It looks like its saving the right ones!
+```{r}
+
+# filter for only a single station
+sub <- subset %>% 
+  filter(StnID == id_list[5])
+
+# run the breakpoint function on it
+bp_df <- breakpoint_fun(sub, window_size = 5)
+
+ggplot() +
+  geom_point(data = sub, 
+             aes(x = year, y = DepthToWater_m)) +
+  geom_vline(data = bp_df, 
+             aes(xintercept = start_date), 
+             color = "red",  # Adjust color as needed
+             linetype = "dashed") +  # Adjust linetype as needed
+  scale_y_reverse()
+```
+# Create function that takes in dataframe and assigns them as breakpoints or not
+
+```{r}
+
+breakpoint_id <- function(df) {
+  
+  # create list of unique IDs
+  id_list <- df$StnID %>% 
+    unique()
+  
+  
+  no_bp <- data.frame()
+  bp <- data.frame()
+  
+  name <- "StnID"
+  
+  
+  for (id in seq(id_list)) {
+    
+    # filter for only a single station
+    sub <- df %>% 
+      filter(StnID == id_list[id])
+    
+    ID = id_list[id]
+    
+    # run the breakpoint function on it
+    bp_df <- breakpoint_fun(sub, window_size = 5)
+    
+    ifelse(nrow(bp_df) < 1,
+           no_bp <- rbind(no_bp, ID),
+           bp <- rbind(bp, ID))
+    
+  }
+  
+  colnames(no_bp) <- name
+  colnames(bp) <- name
+  
+  # return a list of dataframe
+  return(list(bp = bp, non = no_bp))
+  
+}
+
+```
+
+
+## Test the function
+```{r}
+
+ids_test <- breakpoint_id(subset)
+
+ids_test$bp
+ids_test$non
+```
+# Apply the function on the whole depth data
+```{r warning = FALSE, message=FALSE}
+source("funs/breakpoint_fun.R")
+
+depth_texas <- depth_texas %>% 
+  mutate(year = IntegerYear)
+
+ids <- breakpoint_id(depth_texas)
+
+breakpoint_wells <- ids$bp
+non_wells <- ids$non
+
+```
+
 

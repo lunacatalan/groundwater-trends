@@ -26,9 +26,9 @@ rolling_lm_index <- function(data, window_size) {
       filter(index >= start_position & index <= end_position)
     
     # Check if there are any NA values in DepthToWater_m
-    # if (any(is.na(window_data$DepthToWater_m))) {
-    #   next
-    # }
+     if (any(is.na(window_data$DepthToWater_m))) {
+       next
+     }
 
     lm_results <- lm(DepthToWater_m ~ index, 
                      data = window_data)
