@@ -684,17 +684,20 @@ ids_test <- breakpoint_id(subset)
 ids_test$bp
 ids_test$non
 ```
-# Apply the function on the whole depth data
+# Apply the function on the texas data subset
 ```{r warning = FALSE, message=FALSE}
 source("funs/breakpoint_fun.R")
 
 depth_texas <- depth_texas %>% 
   mutate(year = IntegerYear)
 
+length(unique(depth_texas$StnID))
+
 ids <- breakpoint_id(depth_texas)
 
 breakpoint_wells <- ids$bp
 non_wells <- ids$non
+
 
 ```
 
