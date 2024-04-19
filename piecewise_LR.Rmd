@@ -614,7 +614,7 @@ colnames(bp) <- name
 Check the output
 - It looks like its saving the right ones!
 ```{r}
-
+id_list[5]
 # filter for only a single station
 sub <- subset %>% 
   filter(StnID == id_list[5])
@@ -629,6 +629,7 @@ ggplot() +
              aes(xintercept = start_date), 
              color = "red",  # Adjust color as needed
              linetype = "dashed") +  # Adjust linetype as needed
+  theme_minimal() +
   scale_y_reverse()
 ```
 # Create function that takes in dataframe and assigns them as breakpoints or not
@@ -663,6 +664,23 @@ breakpoint_id <- function(df) {
            no_bp <- rbind(no_bp, ID),
            bp <- rbind(bp, ID))
     
+    # plot <- ggplot() +
+    #   geom_point(data = sub, 
+    #              aes(x = year, y = DepthToWater_m)) +
+    #   geom_vline(data = bp_df, 
+    #              aes(xintercept = start_date), 
+    #              color = "red",  # Adjust color as needed
+    #              linetype = "dashed") +  # Adjust linetype as needed
+    #   theme_classic() +
+    #   labs(y = "Depth To Water (m)",
+    #        x = "Year") +
+    #   scale_y_reverse()
+    # 
+    # path = '/Users/lunacatalan/Documents/dev/Jasechko/groundwater-trends/plots'
+    # file_name = paste("plot_", ID, ".png", sep="")
+    # 
+    # ggsave(path = path, filename = file_name, width = 10, height = 5, dpi = 150, units = "in")
+    
   }
   
   colnames(no_bp) <- name
@@ -684,21 +702,51 @@ ids_test <- breakpoint_id(subset)
 ids_test$bp
 ids_test$non
 ```
+
 # Apply the function on the texas data subset
-```{r warning = FALSE, message=FALSE}
+```{r warning = FALSE, message=FALSE, eval = FALSE}
 source("funs/breakpoint_fun.R")
 
 depth_texas <- depth_texas %>% 
   mutate(year = IntegerYear)
 
-length(unique(depth_texas$StnID))
+# run the function
+system.time(
+  ids <- breakpoint_id(depth_texas)
+)
 
-ids <- breakpoint_id(depth_texas)
-
+# extract the wells with breakpoints and non
 breakpoint_wells <- ids$bp
 non_wells <- ids$non
 
+# select the geometries of the points with breakpoints labelled 
+depth_texas_id <- texas_wells_count %>% 
+  mutate(breakpoint = ifelse(texas_wells_count$StnID %in% breakpoint_wells$StnID,
+                             "yes",
+                             "no"))
+# filter for places where there is a breakpoint
+breakpoint <- depth_texas_id %>% 
+  filter(breakpoint == "yes")
+# filter for places with no breakpoint
+non <- depth_texas_id %>% 
+  filter(breakpoint == "no")
 
+# plot the wells
+plot <- ggplot() +
+  geom_sf(data = non, size = 0.5, color = "darkgray") +
+  geom_sf(data = breakpoint, size = 0.5, color = "blue", alpha = 0.5) + 
+  theme_minimal()
+
+
+setwd("plots") #where the .docxs live
+news_files <- list.files(pattern = ".png", 
+                         path = getwd(),
+                         full.names = TRUE, recursive = TRUE, ignore.case = TRUE)
 ```
+
+
+Things I learned
+- Some of the plots with no breakpoints have been experiencing shallowing of groundwater the entire time frame, so there was no change in slope. To counter this: if the sign is negative 3 times in a row --> flag it
+- Some of the plots are declining but did experience a slow in the decline. To counter this: if there is decrease in the slope but not in sign 
 
 
