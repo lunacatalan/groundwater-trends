@@ -36,6 +36,15 @@ library(performanceEstimation)
 
 library(tidyfit)
 library(lubridate)
+
+library(purrr)
+
+# for map
+library(gganimate)
+library(gifski)
+# for interactive mao
+library(plotly)
+library(htmlwidgets)
 ```
 
 
@@ -122,7 +131,7 @@ depth_texas <- depth %>%
 ```
 
 
-
+## Investigate trends with subsets of the texas well data
 ```{r warning = FALSE, message = FALSE}
 subset <- depth_texas %>% 
   mutate(year = IntegerYear) %>% 
@@ -584,6 +593,8 @@ if (nrow(bp_df) >= 1) {
 ## Create the for loop to iterate over the id_list
 ```{r}
 
+source("funs/breakpoint_fun.R")
+
 no_bp <- data.frame()
 bp <- data.frame()
 
@@ -599,11 +610,12 @@ for (id in seq(id_list)) {
   ID = id_list[id]
   
   # run the breakpoint function on it
-  bp_df <- breakpoint_fun(sub, window_size = 5)
+  bp_df <- breakpoint_fun(sub, window_size = 5) %>% 
+    mutate(StnID = ID)
   
   ifelse(nrow(bp_df) < 1,
          no_bp <- rbind(no_bp, ID),
-         bp <- rbind(bp, ID))
+         bp <- rbind(bp, bp_df)) # save the whole dataframe 
   
 }
 
@@ -658,11 +670,12 @@ breakpoint_id <- function(df) {
     ID = id_list[id]
     
     # run the breakpoint function on it
-    bp_df <- breakpoint_fun(sub, window_size = 5)
+    bp_df <- breakpoint_fun(sub, window_size = 5) %>% 
+      mutate(StnID = ID)
     
     ifelse(nrow(bp_df) < 1,
-           no_bp <- rbind(no_bp, ID),
-           bp <- rbind(bp, ID))
+         no_bp <- rbind(no_bp, ID),
+         bp <- rbind(bp, bp_df)) # save the whole dataframe 
     
     # plot <- ggplot() +
     #   geom_point(data = sub, 
@@ -684,7 +697,7 @@ breakpoint_id <- function(df) {
   }
   
   colnames(no_bp) <- name
-  colnames(bp) <- name
+  # colnames(bp) <- name
   
   # return a list of dataframe
   return(list(bp = bp, non = no_bp))
@@ -732,7 +745,7 @@ non <- depth_texas_id %>%
   filter(breakpoint == "no")
 
 # plot the wells
-plot <- ggplot() +
+ggplot() +
   geom_sf(data = non, size = 0.5, color = "darkgray") +
   geom_sf(data = breakpoint, size = 0.5, color = "blue", alpha = 0.5) + 
   theme_minimal()
@@ -748,5 +761,120 @@ news_files <- list.files(pattern = ".png",
 Things I learned
 - Some of the plots with no breakpoints have been experiencing shallowing of groundwater the entire time frame, so there was no change in slope. To counter this: if the sign is negative 3 times in a row --> flag it
 - Some of the plots are declining but did experience a slow in the decline. To counter this: if there is decrease in the slope but not in sign 
+
+Next steps:
+- Colorcode breakpoints by year
+- don't need specific wells --> need locations 
+- sequence of maps that describe time intervals 
+- some cases in CA that oscillate with time 
+- long term vision: map of year interval (eg. 2000-2010)
+- have all the data on the map, and only highlight the ones that have breakpoint in that time interval
+
+```{r}
+depth_texas <- depth_texas %>% 
+  mutate(year = IntegerYear)
+
+# run the function
+system.time(
+  texas_id <- breakpoint_id(depth_texas)
+)
+
+# check to see if all the ids were looked at
+length(unique(texas_id$bp$StnID)) + length(unique(texas_id$non$StnID)) == length(unique(depth_texas$StnID))
+
+# Define a function to generate the sequence of years
+generate_years <- function(start_date, end_date) {
+  seq(start_date, end_date, by = 1)
+}
+
+texas_breakpoints <- texas_id$bp %>% 
+  select(StnID, start_date, end_date) %>% 
+  #arrange(start_date) %>% 
+  # the number of years that this extends
+  mutate(years = end_date - start_date + 1) %>% 
+  mutate(years = ifelse(is.na(years),
+                        1,
+                        years),
+         end_date = ifelse(is.na(end_date),
+                           start_date,
+                           end_date)) %>% 
+  #uncount(years, .remove = FALSE) %>% 
+  group_by(StnID) %>%
+  mutate(range = map2(start_date, end_date, generate_years)) %>% 
+  unnest(cols = range) %>% 
+  select(StnID, range) %>% 
+  arrange(range) %>% 
+  ungroup()
+
+texas_year_plot <- texas_wells_count %>% 
+  select(-name) %>% 
+  inner_join(texas_breakpoints, by = "StnID")
+
+# Make sure to replace this with your desired CRS
+texas_year_plot <- st_transform(texas_year_plot, crs = "+init=EPSG:4326")
+
+# texas base map
+# plot the wells
+texas_time <- ggplot() +
+  geom_sf(data = texas, fill = "white") +
+  geom_sf(data = non, size = 0.5, color = "grey", alpha = 0.5) + 
+  geom_sf(data = texas_year_plot, size = 0.5, color = "blue", alpha = 0.5) + 
+  theme_minimal()
+
+map_with_animation <- texas_time +
+  transition_time(range) +
+  ggtitle('Year: {frame_time}',
+          subtitle = 'Frame {frame} of {nframes}')
+num_years <- max(texas_year_plot$range) - min(texas_year_plot$range) + 1
+animated_map <- animate(map_with_animation, nframes = num_years, renderer = gifski_renderer())
+
+anim_save("animated_map.gif")
+
+```
+
+
+```{r}
+
+texas_year_geo <- texas_year_plot %>% 
+  mutate(date = lubridate::ymd(range, truncated = 2L))
+
+years <- data.frame(seq(1934, 2022, by = 1))
+colnames(years) <- "year"
+
+all_yrs <- list()
+for (i in 1:length(years[,])) { 
+  all_yrs[[i]] <- list(method = "animate",
+                       args = list(
+                         list(frame = list(duration = 300, redraw = FALSE), fromcurrent = TRUE)
+                         ),
+                       label = years$year[i])
+}
+
+
+
+fig <- plot_geo(texas_year_geo, mode = "markers")
+
+# # annotations
+# annot <- list(x = 0, y=0.8, text = "Projection", yanchor = 'bottom', 
+#               xref = 'paper', xanchor = 'right',
+#               showarrow = FALSE)
+
+
+fig <- fig %>% layout(
+  showlegend = FALSE,
+  sliders = list(
+    
+    list(
+      active = (length(years))/2, 
+      currentvalue = list(prefix = "Years: "), 
+      pad = list(t = 20), 
+      
+      steps = all_yrs))
+)
+
+
+fig
+```
+
 
 
