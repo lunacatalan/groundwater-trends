@@ -448,3 +448,8 @@ cus_year_bins <- cus_year_plot %>%
   pivot_wider(names_from = "bin",
               values_from = "StnID")
 ```
+
+The next step:
+1. identify locations (eg. regions or cities) that have blue clusters and record them so that they can be investigated further for groundwater level rise. 
+2. The goal is to add more rows to the locations where groundwater levels may have increased. 
+3. Doing it on a leaflet map could allow you to pan to specific locations and see if there are regional patterns - it could also add a level of reactivity
