@@ -1,0 +1,450 @@
+---
+title: "Piecewise Linear Regression for Groundwater Trends"
+author: "Luna Herschenfeld-Catalan"
+---
+
+# Data Access
+
+## Groundwater Data
+
+Access groundwater data [here](https://zenodo.org/records/10003697). 
+
+Citation: Groundwater level data, aquifer system boundaries, and Supplementary Tables associated with Jasechko, S., Seybold, H., Perrone, D., Fan, Y., Shamsudduha, M., Taylor, R.G., Fallatah, O., Kirchner, J.W. Rapid groundwater decline and some cases of recovery in aquifers globally. Nature, https://doi.org/10.1038/s41586-023-06879-8 (2024).
+
+- Depth to groundwater is saved as `AnnualDepthToGroundwater.csv`. Due to the way its measured, positive slope values signify declines in groundwater. 
+- Groundwater elevation is saved as `AnnualGroundwaterElevation.csv`. 
+
+## US data
+
+Accessed us boundary data [here](https://www.census.gov/cgi-bin/geo/shapefiles/index.php?year=2023&layergroup=States+%28and+equivalent%29)
+
+# Data Exploration 
+
+```{r setup, include=FALSE, message=FALSE, warning = FALSE}
+library(tidyverse)
+library(here)
+
+# to make geospatil objects
+library(sf)
+
+library(usmap)
+
+library(forecast)
+
+# fill in the missing NA values
+library(performanceEstimation)
+
+library(tidyfit)
+library(lubridate)
+
+library(purrr)
+
+# for map
+library(gganimate)
+library(gifski)
+# for interactive mao
+library(plotly)
+library(htmlwidgets)
+```
+
+Read in functions
+```{r}
+# read in the functions
+source(here::here("funs/rolling_lm_index.R"))
+source(here::here("funs/rolling_lm_yr.R"))
+source(here::here("funs/breakpoint_fun.R"))
+source(here::here("funs/breakpoint_id.R"))
+```
+
+Analysis should include 
+```{r message=FALSE, warning = FALSE}
+# read in the depth data
+depth <- read_csv(here('data', "AnnualDepthToGroundwater.csv"))
+
+# read in the elevation data
+elevation <- read_csv(here('data', "AnnualGroundwaterElevation.csv"))
+
+# reda in map data
+us <- st_read(here("data", "tl_2023_us_state", "tl_2023_us_state.shp")) %>% 
+  janitor::clean_names() %>% 
+  select(name, geometry)
+
+
+continental_us <- us %>% 
+  filter(!(name %in% c("American Samoa", 
+                       "Alaska", 
+                       "Puerto Rico", 
+                       "Commonwealth of the Northern Mariana Islands", 
+                       "Hawaii", 
+                       "United States Virgin Islands"))) %>% 
+  st_crop(worldmap, xmin = -125.0, xmax = -66.93457,
+                                    ymin = 24.396308, ymax = 49.384358)
+```
+
+Select wells with more than 10 observations, and distinct geometries for each well. 
+```{r message=FALSE, warning = FALSE}
+
+station_counts <- depth %>% 
+  group_by(StnID) %>% 
+  summarize(count = n()) %>% 
+  filter(count > 10)
+
+# Wells with data that occur more than 10 times
+depth_clean <- depth %>% 
+  filter(StnID %in% station_counts$StnID)
+
+# location of the wells that have 10+ observations
+location <- depth_clean %>% 
+  select(StnID, Lat, Lon) %>% 
+  distinct() %>% # select the unique well names
+  st_as_sf(coords = c("Lon", "Lat")) # set the geographic coordinates
+
+# set coordinate reference system
+location <- location %>% 
+  st_set_crs(st_crs(us)) # same crs as us df
+
+
+# check
+##st_crs(location)
+```
+
+## Create a subset of Texas Wells
+
+```{r message=FALSE, warning = FALSE}
+# filter for texas
+texas <- us %>% 
+  filter(name == "Texas")
+
+# check
+##st_crstexas) == st_crs(location)
+
+# select the well locations within Texas that have more than 10 observations
+texas_wells <- location %>% 
+  st_intersection(texas)
+
+# select all the wells in texas
+depth_texas <- depth %>% 
+  filter(StnID %in% texas_wells$StnID) # select IDs that match the Texas location
+```
+
+# Loading in the Houston data
+```{r message=FALSE, warning = FALSE}
+# load in houston data to check functionality
+houston <- readxl::read_xlsx(here::here("data", "houston_gw.xlsx")) %>% 
+  select(Date, DepthToWater_m = DepthToGW_m) %>% 
+  mutate(year = stringr::str_extract(Date, ".*(?=\\.)")) %>% 
+  mutate(year = as.numeric(year)) %>% 
+  group_by(year) %>% 
+  summarize(DepthToWater_m = mean(DepthToWater_m)) %>% 
+  ungroup()
+```
+
+Run the regression on the data 
+```{r message=FALSE, warning = FALSE}
+
+houston_lm <- rolling_lm_index(houston, window_size = 4) %>% 
+  
+  # calculate the change in slope
+  mutate(change = c(NA, diff(slope)),
+         
+         # calculate the sign change
+         sign_change = c(0, diff(sign(slope))),
+         
+         start_date = as.numeric(start_date),
+         end_date = as.numeric(end_date)) %>%  
+  
+  # identify when the magnitude change is greater than 0.5 and the sign changes from pos to neg
+  mutate(flag = ifelse(abs(change) >= 0.5 & sign_change == -2,
+                       "breakpoint",
+                       NA)) %>% 
+  filter(flag == "breakpoint")
+```
+
+Test the breakpoint_fun on the houston data
+```{r message=FALSE, warning = FALSE}
+### Test on the Houston Data
+houston_lm <- breakpoint_fun(houston, window_size = 5)
+
+ggplot() +
+  geom_point(data = houston, 
+             aes(x = year, y = DepthToWater_m)) +
+  geom_vline(data = houston_lm, 
+             aes(xintercept = start_date), 
+             color = "red",  # Adjust color as needed
+             linetype = "dashed") +  # Adjust linetype as needed
+  scale_y_reverse()
+```
+
+# Label the Texas well breakpoints
+```{r message=FALSE, warning = FALSE}
+# prepare the texas data for processing
+depth_texas <- depth_texas %>% 
+  mutate(year = IntegerYear)
+
+# run the id function
+system.time(
+  texas_id <- breakpoint_id(depth_texas)
+)
+
+# check to see if all the ids were looked at - should be TRUE
+length(unique(texas_id$bp$StnID)) + length(unique(texas_id$non$StnID)) == length(unique(depth_texas$StnID))
+
+# Define a function to generate the sequence of years
+generate_years <- function(start_date, end_date) {
+  seq(start_date, end_date, by = 1)
+}
+
+texas_breakpoints <- texas_id$bp %>% 
+  select(StnID, start_date, end_date) %>% 
+  # the number of years that this extends
+  mutate(years = end_date - start_date + 1) %>% 
+  mutate(years = ifelse(is.na(years),
+                        1,
+                        years),
+         end_date = ifelse(is.na(end_date),
+                           start_date,
+                           end_date)) %>% 
+  #uncount(years, .remove = FALSE) %>% 
+  group_by(StnID) %>%
+  mutate(range = map2(start_date, end_date, generate_years)) %>% 
+  unnest(cols = range) %>% 
+  select(StnID, range) %>% 
+  arrange(range) %>% 
+  ungroup()
+
+texas_year_plot <- texas_wells %>% 
+  select(-name) %>% 
+  inner_join(texas_breakpoints, by = "StnID")
+
+# replace this with desired CRS
+texas_year_plot <- st_transform(texas_year_plot, crs = "+init=EPSG:4326")
+
+
+# extract the wells with breakpoints and non
+breakpoint_wells <- texas_id$bp
+non_wells <- texas_id$non
+
+# select the geometries of the points with breakpoints labelled 
+depth_texas_id <- texas_wells_count %>% 
+  mutate(breakpoint = ifelse(texas_wells_count$StnID %in% breakpoint_wells$StnID,
+                             "yes",
+                             "no"))
+# filter for places with no breakpoint
+non <- depth_texas_id %>% 
+  filter(breakpoint == "no")
+```
+
+Create animated map of the breakpoints over time
+```{r message=FALSE, warning = FALSE}
+texas_time <- ggplot() +
+  # plot the outline of texas
+  geom_sf(data = texas, fill = "white") +
+  # plot the wells with no breakpoints
+  geom_sf(data = non, size = 0.5, color = "grey", alpha = 0.5) + 
+  # plot the wells with breakpoints
+  geom_sf(data = texas_year_plot, size = 0.5, color = "blue", alpha = 0.5) + 
+  theme_minimal()
+
+map_with_animation <- texas_time +
+  transition_time(range) +
+  ggtitle('Year: {frame_time}',
+          subtitle = 'Frame {frame} of {nframes}')
+num_years <- max(texas_year_plot$range) - min(texas_year_plot$range) + 1
+
+animated_map <- animate(map_with_animation, 
+                        nframes = num_years, 
+                        renderer = gifski_renderer())
+
+anim_save("animated_texas.gif")
+
+```
+
+Next steps:
+- Colorcode breakpoints by year
+- Don't need specific wells --> need locations 
+- Sequence of maps that describe time intervals 
+
+Use the `texas_year_plot` dataframe that has the list of wells that have breakpoints, and the years that they occur. 
+- Split into 10 year intervals. The years go from 1934-2022
+```{r}
+# goes from 
+range(texas_year_plot$range)
+
+# create bins of 10 years
+texas_year_bins <- texas_year_plot %>% 
+  mutate(bin = case_when(range %in% c(1934:1944) ~ "1934-1944", 
+                         range %in% c(1945:1955) ~ "1945-1955", 
+                         range %in% c(1956:1966) ~ "1956-1966", 
+                         range %in% c(1967:1977) ~ "1967-1977",
+                         range %in% c(1978:1988) ~ "1978-1988", 
+                         range %in% c(1989:1999) ~ "1989-1999", 
+                         range %in% c(2000:2010) ~ "2000-2010",
+                         range %in% c(2011:2022) ~ "2011-2022")) %>% 
+  select(!range) %>% 
+  st_drop_geometry() %>% 
+  pivot_wider(names_from = "bin",
+              values_from = "StnID")
+
+
+# select the range
+plot_1944 <- texas_year_bins["1934-1944"] %>% 
+  # unnest the list of station IDs
+  unnest(cols = c(`1934-1944`)) %>% 
+  rename(StnID = `1934-1944`) %>% 
+  # select only the distinct StnIDs
+  distinct() %>% 
+  left_join(texas_wells) %>%
+  select(!name) %>% 
+  st_as_sf() %>% 
+  ggplot() +
+  # plot the outline of texas
+  geom_sf(data = texas, fill = "white") +
+  # plot the wells with no breakpoints
+  geom_sf(data = non, size = 0.5, color = "grey", alpha = 0.5) + 
+  # plot the wells with breakpoints for that range
+  geom_sf(data = plot_1944, size = 0.5, color = "blue", alpha = 0.5) + 
+  theme_minimal()
+```
+
+Create plots for every range of values
+- Map of year interval defined above. Here there are 8 10 year intervals (with the exception of 2011-2022 because I wanted to make sure all the data was represented)
+- All of the wells are represented in gray on the map, and only the wells that experienced a breakpoint during that 10 year interval are highlighted. 
+- plots saved to `plots` with range defined in image name (eg. plot_1989-1999 is a plot of the wells in Texas that had a breakpoint between 1989 and 1999)
+
+```{r}
+
+for (range in seq(texas_year_bins)) {
+  
+  range_df <- texas_year_bins[range]
+  col_name <- colnames(range_df)
+  
+  plot_data <- range_df %>% 
+    # unnest the list of station IDs
+    unnest(cols = c(col_name)) %>% 
+    rename(StnID = col_name) %>% 
+    # select only the distinct StnIDs
+    distinct() %>% 
+    left_join(texas_wells) %>%
+    select(!name) %>% 
+    st_as_sf()
+    
+  plot <- ggplot() +
+    # plot the outline of texas
+    geom_sf(data = texas, fill = "white") +
+    # plot all the wells in texas
+    geom_sf(data = texas_wells, size = 0.05, color = "grey", alpha = 0.5) + 
+    # plot the wells with breakpoints for that range
+    geom_sf(data = plot_data, size = 0.05, color = "blue", alpha = 0.5) + 
+    theme_classic()
+  
+  path = '/Users/lunacatalan/Documents/dev/Jasechko/groundwater-trends/plots'
+  file_name = paste("plot_", col_name, ".png", sep="")
+  ggsave(path = path, filename = file_name, width = 10, height = 5, dpi = 150, units = "in")
+  
+}
+
+```
+
+
+This is the set up to select the wells that are within the continental US. Because of computation time, this did not work on my computer.
+
+- The acronym `cus` refers to `continental US`
+```{r}
+# select the well locations within continental US (cus) that have more than 10 observations
+cus_wells <- location %>% 
+  st_intersection(continental_us)
+
+# select all the wells in the cus
+cus_depth <- depth %>% 
+  filter(StnID %in% cus_wells$StnID) # select IDs that match the Texas location
+
+# prepare the cus data for processing
+cus_depth <- cus_depth %>% 
+  mutate(year = IntegerYear)
+
+# run the id function
+system.time(
+  cus_id <- breakpoint_id(cus_depth)
+)
+
+# check to see if all the ids were looked at - should be TRUE
+length(unique(cus_id$bp$StnID)) + length(unique(cus_id$non$StnID)) == length(unique(cus_depth$StnID))
+```
+
+If the above is true, then move on to the next code chunk. 
+
+```{r}
+# Define a function to generate the sequence of years
+generate_years <- function(start_date, end_date) {
+  seq(start_date, end_date, by = 1)
+}
+
+cus_breakpoints <- cus_id$bp %>% 
+  select(StnID, start_date, end_date) %>% 
+  # the number of years that this extends
+  mutate(years = end_date - start_date + 1) %>% 
+  mutate(years = ifelse(is.na(years),
+                        1,
+                        years),
+         end_date = ifelse(is.na(end_date),
+                           start_date,
+                           end_date)) %>% 
+  #uncount(years, .remove = FALSE) %>% 
+  group_by(StnID) %>%
+  mutate(range = map2(start_date, end_date, generate_years)) %>% 
+  unnest(cols = range) %>% 
+  select(StnID, range) %>% 
+  arrange(range) %>% 
+  ungroup()
+
+cus_year_plot <- cus_wells %>% 
+  select(-name) %>% 
+  inner_join(cus_breakpoints, by = "StnID")
+
+# replace this with desired CRS -- is this the right crs?
+cus_year_plot <- st_transform(cus_year_plot, crs = "+init=EPSG:4326")
+
+
+# extract the wells with breakpoints and non
+breakpoint_wells <- cus_id$bp
+non_wells <- cus_id$non
+
+# select the geometries of the points with breakpoints labelled 
+cus_depth_id <- cus_wells %>% 
+  mutate(breakpoint = ifelse(cus_wells$StnID %in% breakpoint_wells$StnID,
+                             "yes",
+                             "no"))
+# filter for places with no breakpoint
+non <- cus_depth_id %>% 
+  filter(breakpoint == "no")
+```
+
+Map the intervals for cus data
+- edit the ranges
+
+```{r}
+# goes from 1865 2022
+range(depth_clean$IntegerYear)
+
+# create bins of 10 years
+cus_year_bins <- cus_year_plot %>% 
+  mutate(bin = case_when(range %in% c(1865:1955) ~ "1945-1955", 
+                         range %in% c(1956:1966) ~ "1956-1966", 
+                         range %in% c(1967:1977) ~ "1967-1977",
+                         range %in% c(1978:1988) ~ "1978-1988", 
+                         range %in% c(1989:1999) ~ "1989-1999", 
+                         range %in% c(2000:2010) ~ "2000-2010",
+                         range %in% c(2011:2022) ~ "2011-2022",
+                         range %in% c(1934:1944) ~ "1934-1944", 
+                         range %in% c(1945:1955) ~ "1945-1955", 
+                         range %in% c(1956:1966) ~ "1956-1966", 
+                         range %in% c(1967:1977) ~ "1967-1977",
+                         range %in% c(1978:1988) ~ "1978-1988", 
+                         range %in% c(1989:1999) ~ "1989-1999", 
+                         range %in% c(2000:2010) ~ "2000-2010",
+                         range %in% c(2011:2022) ~ "2011-2022")) %>% 
+  select(!range) %>% 
+  st_drop_geometry() %>% 
+  pivot_wider(names_from = "bin",
+              values_from = "StnID")
+```

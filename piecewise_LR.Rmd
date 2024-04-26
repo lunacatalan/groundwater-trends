@@ -79,6 +79,7 @@ station_counts <- depth %>%
   summarize(count = n()) %>% 
   filter(count > 10)
 
+# the depth data with wells that occur more than 10 times
 depth_clean <- depth %>% 
   filter(StnID %in% station_counts$StnID)
 
@@ -86,9 +87,25 @@ depth_clean <- depth %>%
 ##st_crs(location)
 
 # all the points - this isnt super helpful 
-# ggplot(location) +
-#   geom_sf(size = 0.5)
-  
+ggplot(location) +
+   geom_sf(size = 0.5)
+
+# ggplot(us) +
+#    geom_sf()
+
+continental_us <- us %>% 
+  filter(!(name %in% c("American Samoa", 
+                       "Alaska", 
+                       "Puerto Rico", 
+                       "Commonwealth of the Northern Mariana Islands", 
+                       "Hawaii", 
+                       "United States Virgin Islands"))) %>% 
+  st_crop(worldmap, xmin = -125.0, xmax = -66.93457,
+                                    ymin = 24.396308, ymax = 49.384358)
+
+ggplot(continental_us) +
+  geom_sf() +
+  theme_minimal()
 ```
 
 
@@ -267,7 +284,7 @@ for(start_year in seq_along(years)) {
 
 ```
 
-```{r}
+```{r warning = FALSE, message = FALSE, eval = FALSE}
 
 subset <- subset %>% 
   mutate(index = row_number())
@@ -362,10 +379,8 @@ Want code to be able to detect a case like saudis arabia
     - Change in sign of slope (if using depth to water: positive to negative slope)
     - Change in magnitude (product of slopes should be negative; difference between change in slopes slopes should be > 0.5m/yr)
     
-```{r warning = FALSE, message = FALSE}
+```{r warning = FALSE, message = FALSE, eval = FALSE}
 
-source("funs/rolling_lm_index.R")
-source("funs/rolling_lm_yr.R")
 
 # Calculate rolling linear regression with a 5-year window
 rolling_results <- rolling_lm_yr(subset, window_size = 5) %>% 
@@ -385,7 +400,7 @@ rolling_results <- rolling_lm_yr(subset, window_size = 5) %>%
 ```
 
 
-```{r}
+```{r warning = FALSE, message = FALSE, eval = FALSE}
 
 ggplot(data = subset, 
              aes(x = year, y = DepthToWater_m)) +
@@ -400,7 +415,11 @@ ggplot(data = subset,
 
 # Loading in the Houston data
 
-```{r}
+```{rwarning = FALSE, message = FALSE}
+
+source("funs/rolling_lm_index.R")
+source("funs/rolling_lm_yr.R")
+
 houston <- readxl::read_xlsx(here::here("data", "houston_gw.xlsx")) %>% 
   select(Date, DepthToWater_m = DepthToGW_m) %>% 
   mutate(year = stringr::str_extract(Date, ".*(?=\\.)")) %>% 
@@ -430,7 +449,7 @@ houston_lm <- rolling_lm_index(houston, window_size = 4) %>%
 
 ## Create nested functions to identify breakpoints
 
-```{r}
+```{r warning = FALSE, message = FALSE, eval = FALSE}
 
 breakpoint_fun <- rolling_lm_index <- function(data, window_size) {
   
@@ -486,9 +505,11 @@ breakpoint_fun <- rolling_lm_index <- function(data, window_size) {
 }
 
 ```
+
 ### Test on the Houston Data
 
-```{r}
+```{r warning = FALSE, message = FALSE}
+source("funs/breakpoint_fun.R")
 houston_lm <- breakpoint_fun(houston, window_size = 5)
 
 ggplot() +
@@ -810,14 +831,31 @@ texas_year_plot <- texas_wells_count %>%
   select(-name) %>% 
   inner_join(texas_breakpoints, by = "StnID")
 
-# Make sure to replace this with your desired CRS
+# replace this with desired CRS
 texas_year_plot <- st_transform(texas_year_plot, crs = "+init=EPSG:4326")
 
 # texas base map
 # plot the wells
+
+# extract the wells with breakpoints and non
+breakpoint_wells <- texas_id$bp
+non_wells <- texas_id$non
+
+# select the geometries of the points with breakpoints labelled 
+depth_texas_id <- texas_wells_count %>% 
+  mutate(breakpoint = ifelse(texas_wells_count$StnID %in% breakpoint_wells$StnID,
+                             "yes",
+                             "no"))
+# filter for places with no breakpoint
+non <- depth_texas_id %>% 
+  filter(breakpoint == "no")
+
 texas_time <- ggplot() +
+  # plot the outline of texas
   geom_sf(data = texas, fill = "white") +
+  # plot the wells with no breakpoints
   geom_sf(data = non, size = 0.5, color = "grey", alpha = 0.5) + 
+  # plot the wells with breakpoints
   geom_sf(data = texas_year_plot, size = 0.5, color = "blue", alpha = 0.5) + 
   theme_minimal()
 
@@ -826,13 +864,16 @@ map_with_animation <- texas_time +
   ggtitle('Year: {frame_time}',
           subtitle = 'Frame {frame} of {nframes}')
 num_years <- max(texas_year_plot$range) - min(texas_year_plot$range) + 1
-animated_map <- animate(map_with_animation, nframes = num_years, renderer = gifski_renderer())
+animated_map <- animate(map_with_animation, 
+                        nframes = num_years, 
+                        renderer = gifski_renderer())
 
 anim_save("animated_map.gif")
 
 ```
 
 
+Map attempt?
 ```{r}
 
 texas_year_geo <- texas_year_plot %>% 
@@ -876,5 +917,24 @@ fig <- fig %>% layout(
 fig
 ```
 
+# Attempt with all of the depth data
+```{r warning = FALSE, error=FALSE, eval = FALSE}
+
+depth_clean <- depth_clean %>% 
+  mutate(year = IntegerYear)
+
+# select the well locations within Texas
+us_wells <- location %>% 
+  st_intersection(continental_us)
+
+# select the texas wells that have more than 10 observations
+texas_wells_count <- texas_wells %>% 
+  filter(StnID %in% station_counts$StnID) # select IDs that match the Texas location
+
+
+
+ 
+
+```
 
 
