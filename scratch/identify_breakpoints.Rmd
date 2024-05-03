@@ -45,6 +45,7 @@ library(gifski)
 # for interactive mao
 library(plotly)
 library(htmlwidgets)
+library(leaflet)
 ```
 
 Read in functions
@@ -225,8 +226,8 @@ breakpoint_wells <- texas_id$bp
 non_wells <- texas_id$non
 
 # select the geometries of the points with breakpoints labelled 
-depth_texas_id <- texas_wells_count %>% 
-  mutate(breakpoint = ifelse(texas_wells_count$StnID %in% breakpoint_wells$StnID,
+depth_texas_id <- texas_wells %>% 
+  mutate(breakpoint = ifelse(texas_wells$StnID %in% breakpoint_wells$StnID,
                              "yes",
                              "no"))
 # filter for places with no breakpoint
@@ -295,8 +296,9 @@ plot_1944 <- texas_year_bins["1934-1944"] %>%
   distinct() %>% 
   left_join(texas_wells) %>%
   select(!name) %>% 
-  st_as_sf() %>% 
-  ggplot() +
+  st_as_sf()
+
+ggplot() +
   # plot the outline of texas
   geom_sf(data = texas, fill = "white") +
   # plot the wells with no breakpoints
@@ -351,8 +353,10 @@ This is the set up to select the wells that are within the continental US. Becau
 - The acronym `cus` refers to `continental US`
 ```{r}
 # select the well locations within continental US (cus) that have more than 10 observations
-cus_wells <- location %>% 
-  st_intersection(continental_us)
+system.time(
+  cus_wells <- location %>% 
+    st_intersection(continental_us)
+)
 
 # select all the wells in the cus
 cus_depth <- depth %>% 
@@ -422,34 +426,115 @@ non <- cus_depth_id %>%
 Map the intervals for cus data
 - edit the ranges
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
 # goes from 1865 2022
 range(depth_clean$IntegerYear)
 
 # create bins of 10 years
 cus_year_bins <- cus_year_plot %>% 
-  mutate(bin = case_when(range %in% c(1865:1955) ~ "1945-1955", 
-                         range %in% c(1956:1966) ~ "1956-1966", 
-                         range %in% c(1967:1977) ~ "1967-1977",
-                         range %in% c(1978:1988) ~ "1978-1988", 
-                         range %in% c(1989:1999) ~ "1989-1999", 
-                         range %in% c(2000:2010) ~ "2000-2010",
-                         range %in% c(2011:2022) ~ "2011-2022",
-                         range %in% c(1934:1944) ~ "1934-1944", 
-                         range %in% c(1945:1955) ~ "1945-1955", 
-                         range %in% c(1956:1966) ~ "1956-1966", 
-                         range %in% c(1967:1977) ~ "1967-1977",
-                         range %in% c(1978:1988) ~ "1978-1988", 
-                         range %in% c(1989:1999) ~ "1989-1999", 
-                         range %in% c(2000:2010) ~ "2000-2010",
-                         range %in% c(2011:2022) ~ "2011-2022")) %>% 
+  mutate(bin = case_when(range %in% c(1865:1875) ~ "1865-1875", 
+                         range %in% c(1876:1886) ~ "1876-1886",
+                         range %in% c(1887:1897) ~ "1887-1897",
+                         range %in% c(1898:1908) ~ "1898-1908",
+                         range %in% c(1909:1919) ~ "1909-1919",
+                         range %in% c(1920:1930) ~ "1920-1930",
+                         range %in% c(1931:1941) ~ "1931-1941",
+                         range %in% c(1942:1952) ~ "1942-1952",
+                         range %in% c(1953:1963) ~ "1953-1963", 
+                         range %in% c(1964:1974) ~ "1964-1974",
+                         range %in% c(1975:1985) ~ "1975-1985", 
+                         range %in% c(1986:1996) ~ "1986-1996", 
+                         range %in% c(1997:2007) ~ "1997-2007",
+                         range %in% c(2008:2018) ~ "2008-2018",
+                         range %in% c(2019:2022) ~ "2019-2022")) %>% 
   select(!range) %>% 
   st_drop_geometry() %>% 
   pivot_wider(names_from = "bin",
               values_from = "StnID")
+```
+Save still plots of maps:
+
+```{r}
+
+for (range in seq(cus_year_bins)) {
+  
+  range_df <- cus_year_bins[range]
+  col_name <- colnames(range_df)
+  
+  plot_data <- range_df %>% 
+    # unnest the list of station IDs
+    unnest(cols = c(col_name)) %>% 
+    rename(StnID = col_name) %>% 
+    # select only the distinct StnIDs
+    distinct() %>% 
+    left_join(cus_wells) %>%
+    select(!name) %>% 
+    st_as_sf()
+    
+  plot <- ggplot() +
+    # plot the outline of texas
+    geom_sf(data = continental_us, fill = "white") +
+    # plot all the wells in texas
+    geom_sf(data = cus_wells, size = 0.05, color = "grey", alpha = 0.5) + 
+    # plot the wells with breakpoints for that range
+    geom_sf(data = plot_data, size = 0.05, color = "blue", alpha = 0.5) + 
+    theme_classic()
+  
+  path = '/Users/lunacatalan/Documents/dev/Jasechko/groundwater-trends/plots'
+  file_name = paste("plot_", col_name, ".png", sep="")
+  ggsave(path = path, filename = file_name, width = 10, height = 5, dpi = 150, units = "in")
+  
+}
+
 ```
 
 The next step:
 1. identify locations (eg. regions or cities) that have blue clusters and record them so that they can be investigated further for groundwater level rise. 
 2. The goal is to add more rows to the locations where groundwater levels may have increased. 
 3. Doing it on a leaflet map could allow you to pan to specific locations and see if there are regional patterns - it could also add a level of reactivity
+
+```{r, message=FALSE, warning = FALSE}
+
+for (range in seq(cus_year_bins)) {
+  
+  range_df <- cus_year_bins[range]
+  col_name <- colnames(range_df)
+  
+  plot_data <- range_df %>% 
+    # unnest the list of station IDs
+    unnest(cols = c(col_name)) %>% 
+    rename(StnID = col_name) %>% 
+    # select only the distinct StnIDs
+    distinct() %>% 
+    left_join(cus_wells) %>%
+    select(!name) %>% 
+    st_as_sf()
+  
+  # create leaflet map using the map data
+  m <- leaflet() %>% 
+    setView(-96, 37.8, 4) %>% 
+    addTiles() %>% 
+    addCircleMarkers(data = cus_wells, radius = 0.01, color = "grey") %>% 
+    addCircleMarkers(data = plot_data,
+                     radius = 0.01)
+  
+  # save the file using the date range naming conventions
+  file_name = paste("plot_", col_name, ".html", sep="")
+  saveWidget(m, file = file_name)
+  
+}
+
+```
+
+
+# Cities 
+
+## 1953-1963
+- Ciudad Juarez
+- Artesia / Roswell 
+- Carlsbad
+- San Antonio
+- New Braunfels
+- Fort Collins
+- Sedgwick/Burrton, Kansas
+
