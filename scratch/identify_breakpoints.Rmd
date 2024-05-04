@@ -538,3 +538,50 @@ for (range in seq(cus_year_bins)) {
 - Fort Collins
 - Sedgwick/Burrton, Kansas
 
+## 1964-1974
+- San Antonio, Texas
+- Fort Stockton, Texas
+- Carlsbad, New Mexico
+- Fillmore, Utah
+- Santa Maria, California
+- Hollister (Monterey), California 
+- Hempstead, NY 
+- Parsippany Troy Hilla, NJ
+- Binghamton, NY
+
+## 1975-1985
+- Phoenix, Arizona
+- Palmdate, CA
+- Hollister (Monterey), California 
+- Winnemucca
+- Battle Mountain, NV
+- Arco, ID
+- Lehi, Utah
+- Roswell, NM
+- Houston, TX
+- Elmer, Louisiana
+- Baton Rouge, Louisiana
+- Trinity, Florida 
+- Aurora, Nebraska
+
+## 1986-1996
+- Phoenix, Arizona
+- Hermiston, Oregon
+- Howe, Idaho
+- Lehi, Utah
+- Ciudad Juarez
+- Austin, TX
+- Houston, TX
+- Baton Rouge, Louisiana
+- Albany, Georgia
+- Valdosta, Georgia
+- Trinity, Florida 
+- Philadelphia, Pennsylvania 
+- Hempstead, NY
+- Grand Island, Nebraska
+- Saint Paul, Minnesota 
+- Monteview, Idaho
+
+
+
+
